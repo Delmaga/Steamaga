@@ -112,24 +112,33 @@ async def get_app_details(session: aiohttp.ClientSession, appid: int):
 
 
 async def get_steamspy_tags(session: aiohttp.ClientSession, appid: int):
-    """Tags communautaires (ex: Horror, Adventure...) via SteamSpy."""
+    """
+    Tags communautaires (ex: Horror, Adventure...) via SteamSpy, triés par nombre
+    de votes réel (du plus voté au moins voté). SteamSpy renvoie les tags avec leur
+    nombre de votes, mais ne garantit PAS que l'ordre du JSON corresponde à ce
+    classement : on retrie nous-mêmes pour être sûr.
+    """
     params = {"request": "appdetails", "appid": appid}
     data = await _fetch_json(session, STEAMSPY_URL, params)
     if not data or "tags" not in data or not isinstance(data["tags"], dict):
-        return []
-    return [t.lower() for t in data["tags"].keys()]
+        return [], {}
+    # data["tags"] est un dict {nom_du_tag: nombre_de_votes}
+    raw = {str(t).lower(): int(v) for t, v in data["tags"].items() if isinstance(v, (int, float))}
+    ordered_names = [t for t, _ in sorted(raw.items(), key=lambda kv: kv[1], reverse=True)]
+    return ordered_names, raw
 
 
 async def enrich_game(session: aiohttp.ClientSession, appid: int):
-    """Récupère détails + tags communautaires + note Steam en parallèle pour un appid."""
-    details, tags, reviews = await asyncio.gather(
+    """Récupère détails + tags communautaires (triés par votes) + note Steam en parallèle."""
+    details, (tags_ordered, tags_votes), reviews = await asyncio.gather(
         get_app_details(session, appid),
         get_steamspy_tags(session, appid),
         get_review_summary(session, appid),
     )
     if not details:
         return None
-    details["community_tags"] = tags
+    details["community_tags"] = tags_ordered      # noms triés du + voté au - voté
+    details["community_tags_votes"] = tags_votes  # {nom: nombre de votes}
     details["reviews"] = reviews
     return details
 
@@ -176,12 +185,35 @@ async def get_appids_by_category(session: aiohttp.ClientSession, category_key: s
 # Logique de filtrage : est-ce que ce jeu correspond à ce filtre ?
 # ----------------------------------------------------------------------
 
-def game_has_category(game: dict, category_key: str) -> bool:
-    """Vérifie si un jeu correspond à une catégorie donnée (horreur, casse-tête...)."""
+def game_has_category(game: dict, category_key: str, top_n: int = 8, min_vote_ratio: float = 0.12) -> bool:
+    """
+    Vérifie si un jeu correspond vraiment à une catégorie donnée (horreur, casse-tête...).
+    Le tag doit à la fois :
+      - être parmi les `top_n` tags les plus votés du jeu, ET
+      - avoir au moins `min_vote_ratio` (12% par défaut) des votes du tag n°1
+    Ça élimine les jeux où un tag est présent de façon anecdotique (ex: quelques
+    votes "Horror" sur un jeu Battle Royale comme Apex Legends ou Fall Guys), qui
+    ne devraient clairement pas apparaître comme "jeux d'horreur".
+    """
     info = STEAM_CATEGORIES.get(category_key)
     if not info:
         return False
-    community_tags = game.get("community_tags", [])
+
+    votes = game.get("community_tags_votes")
+    if votes:
+        ordered = sorted(votes.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
+        if not ordered:
+            return False
+        max_votes = ordered[0][1]
+        if max_votes <= 0:
+            return False
+        for tag, v in ordered:
+            if info["keyword"] in tag and v >= max_votes * min_vote_ratio:
+                return True
+        return False
+
+    # Repli si jamais on n'a pas les votes (ne devrait pas arriver) : ordre simple
+    community_tags = game.get("community_tags", [])[:top_n]
     return any(info["keyword"] in tag for tag in community_tags)
 
 
@@ -196,9 +228,7 @@ def game_matches_filter(game: dict, tags: list, categories: list,
 
     # --- Catégorie (thème : horreur, aventure...) ---
     if categories:
-        community_tags = game.get("community_tags", [])
-        keywords = [STEAM_CATEGORIES[c]["keyword"] for c in categories if c in STEAM_CATEGORIES]
-        matches = [any(kw in tag for tag in community_tags) for kw in keywords]
+        matches = [game_has_category(game, c) for c in categories]
         if categories_all:
             if not all(matches):
                 return False

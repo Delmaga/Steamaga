@@ -227,7 +227,10 @@ class SteamCommands(commands.Cog):
         for i in range(0, len(appids), 10):
             batch = appids[i:i + 10]
             results = await asyncio.gather(*[steam_api.enrich_game(self.session, a) for a in batch])
-            games.extend([g for g in results if g])
+            for g in results:
+                if g and steam_api.game_has_category(g, categorie.value):
+                    games.append(g)
+            await asyncio.sleep(1)  # ménage SteamSpy (rate-limit) pour des réponses fiables
 
         games.sort(key=lambda g: g.get("release_date", ""), reverse=True)
         games = games[:40]

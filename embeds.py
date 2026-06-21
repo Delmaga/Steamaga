@@ -45,6 +45,13 @@ def _embed_color(game: dict) -> int:
     return 0x1B2838            # bleu steam par défaut (pas d'avis / pas encore sorti)
 
 
+def _community_tags_text(game: dict) -> str:
+    tags = game.get("community_tags", [])[:5]
+    if not tags:
+        return "—"
+    return ", ".join(t.title() for t in tags)
+
+
 def build_game_embed(game: dict, upcoming: bool = False, footer_extra: str = None) -> discord.Embed:
     color = _embed_color(game) if not upcoming else 0x66C0F4
     title_prefix = "🔜 Bientôt sur Steam" if upcoming else "🆕 Nouveau sur Steam"
@@ -71,6 +78,7 @@ def build_game_embed(game: dict, upcoming: bool = False, footer_extra: str = Non
         value=", ".join(game.get("developers", [])) or "Inconnu",
         inline=True,
     )
+    embed.add_field(name="🏷️ Tags communauté", value=_community_tags_text(game), inline=False)
 
     embed.add_field(name="⭐ Note", value=_rating_text(game), inline=False)
 
