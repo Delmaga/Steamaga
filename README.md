@@ -42,6 +42,40 @@ Steam, sans aucun filtre.
 *(réservé aux modérateurs)*
 Définit le salon qui reçoit les jeux **à venir** (pas encore sortis), sans filtre.
 
+### `/stteam salon:#salon`
+*(réservé aux modérateurs)*
+Équivalent de `/jeux` + `/pres` combinés dans un seul salon : nouveautés **et**
+jeux à venir, toute catégorie et tout prix confondus.
+
+### `/stcat salon:#salon categorie:Horreur`
+*(réservé aux modérateurs)*
+Commande générique : abonne un salon à **une catégorie précise** (toutes celles
+listées dans `/filtre`), pour les nouveaux jeux **et** les jeux à venir, sans
+filtre de prix ni de tag. Pratique pour créer tes propres raccourcis sans
+attendre que j'ajoute une commande dédiée.
+
+### `/sthorror salon:#salon`
+*(réservé aux modérateurs)*
+Raccourci équivalent à `/stcat categorie:Horreur`. Tous les jeux d'horreur,
+peu importe le prix.
+
+### `/stct salon:#salon`
+*(réservé aux modérateurs)*
+Raccourci équivalent à `/stcat categorie:Casse-tête`.
+
+> 💡 Envie d'horreur **drôle** uniquement ? Utilise plutôt `/prefiltre` et choisis
+> le pack **"🤡 Horreur mais drôle"** — celui-ci exige que le jeu soit horreur
+> *et* drôle en même temps (pas juste l'un ou l'autre), contrairement à
+> `/sthorror` qui prend toute l'horreur sans distinction.
+
+### `/stall salon:#salon categorie:Horreur`
+*(réservé aux modérateurs)*
+La commande "catalogue" : récupère **tous les jeux déjà sortis** de cette
+catégorie (via SteamSpy), les publie d'un coup dans le salon (les ~40 plus
+récents, pour ne pas noyer le salon sous des centaines de messages d'un coup),
+**et** abonne automatiquement le salon pour que les futurs jeux de cette
+catégorie arrivent aussi, peu importe leur prix.
+
 ### `/filtre salon:#salon`
 Ouvre une interface interactive (menus déroulants) pour que **toi seul**
 configures ton filtre personnel :
@@ -64,8 +98,24 @@ Supprime ton filtre personnel.
 *(réservé aux modérateurs)*
 Affiche une liste de **packs prêts à l'emploi** (combinaisons de tag +
 catégorie + prix + démo déjà définies, ex : "Horreur Solo", "Multijoueur
-Gratuit"...). Tu choisis un pack dans le menu, et le salon est abonné à ce pack.
-Tu peux abonner plusieurs salons à plusieurs packs différents.
+Gratuit", "Horreur mais drôle"...). Tu choisis un pack dans le menu, et le
+salon est abonné à ce pack. Tu peux abonner plusieurs salons à plusieurs packs
+différents.
+
+## 🖼️ À quoi ressemble un message
+
+Chaque jeu posté affiche désormais :
+- la grande image officielle Steam du jeu (façon affiche)
+- le **lien direct** vers la fiche Steam (titre cliquable + bouton "Voir sur Steam")
+- le **prix** exact (ou "Gratuit")
+- la **date de sortie**
+- le **développeur**
+- la **note Steam** (% positif + description type "Très positive") et le score
+  **Metacritic** si disponible
+- les genres, le mode de jeu (solo/multi/coop) et la présence d'une démo
+
+La couleur de la bordure de l'embed change même selon la note du jeu (vert si
+bien noté, orange si mitigé, rouge si mal noté).
 
 ## ⚙️ Fonctionnement technique
 

@@ -1,14 +1,22 @@
 """
 Cog contenant les commandes slash :
-  /jeux        -> définit le salon qui reçoit TOUS les nouveaux jeux (aucun filtre)
-  /pres        -> définit le salon qui reçoit les jeux À VENIR (aucun filtre)
-  /filtre      -> configuration interactive d'un filtre personnel, sauvegardé par compte
-  /prefiltre   -> abonne un salon à un pack de filtres prédéfinis
+  /jeux            -> définit le salon qui reçoit TOUS les nouveaux jeux (aucun filtre)
+  /pres            -> définit le salon qui reçoit les jeux À VENIR (aucun filtre)
+  /stteam          -> salon qui reçoit nouveautés ET jeux à venir, toute catégorie/prix
+  /filtre          -> configuration interactive d'un filtre personnel, sauvegardé par compte
+  /prefiltre       -> abonne un salon à un pack de filtres prédéfinis
+  /stcat           -> abonne un salon à UNE catégorie (générique, choix dans la liste)
+  /sthorror        -> raccourci /stcat catégorie=horreur
+  /stct            -> raccourci /stcat catégorie=casse-tête
+  /stall           -> affiche D'UN COUP tous les jeux déjà sortis d'une catégorie
+                       (catalogue complet, toute prix confondu) + abonne le salon
+                       pour que les futurs jeux de cette catégorie arrivent aussi
 
 + une boucle de fond qui vérifie Steam toutes les X minutes et poste les jeux
   correspondants dans tous les salons concernés.
 """
 
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -19,8 +27,12 @@ import steam_api
 from config import (
     PRESETS, CHECK_INTERVAL_MINUTES, STEAM_TAGS, STEAM_CATEGORIES,
 )
-from embeds import build_game_embed
+from embeds import build_game_embed, build_steam_link_view
 from views import FilterBuilderView
+
+CATEGORY_CHOICES = [
+    app_commands.Choice(name=info["label"], value=key) for key, info in STEAM_CATEGORIES.items()
+]
 
 
 class PresetSelect(discord.ui.Select):
@@ -126,6 +138,115 @@ class SteamCommands(commands.Cog):
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     # ---------------------------------------------------------------
+    # /stteam (salon) -> nouveautés ET jeux à venir, toute catégorie/prix
+    # ---------------------------------------------------------------
+    @app_commands.command(name="stteam", description="Publie dans un salon TOUS les jeux Steam (nouveautés + à venir), sans filtre.")
+    @app_commands.describe(salon="Salon où tout publier")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def stteam(self, interaction: discord.Interaction, salon: discord.TextChannel):
+        db.set_feed_channel(interaction.guild_id, "new", salon.id)
+        db.set_feed_channel(interaction.guild_id, "upcoming", salon.id)
+        await interaction.response.send_message(
+            f"✅ {salon.mention} recevra désormais **tous** les jeux Steam : nouveautés et jeux à venir, "
+            f"toute catégorie et tout prix confondus.",
+            ephemeral=True,
+        )
+
+    # ---------------------------------------------------------------
+    # /stcat (salon) (catégorie) -> abonnement générique à une catégorie
+    # ---------------------------------------------------------------
+    @app_commands.command(name="stcat", description="Abonne un salon à une catégorie de jeux Steam (nouveaux + à venir).")
+    @app_commands.describe(salon="Salon où publier", categorie="Catégorie de jeux à suivre")
+    @app_commands.choices(categorie=CATEGORY_CHOICES)
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def stcat(self, interaction: discord.Interaction, salon: discord.TextChannel, categorie: app_commands.Choice[str]):
+        db.add_category_subscription(interaction.guild_id, salon.id, categorie.value)
+        label = STEAM_CATEGORIES[categorie.value]["label"]
+        await interaction.response.send_message(
+            f"✅ Les jeux **{label}** (nouveaux et à venir, tout prix) seront publiés dans {salon.mention}.",
+            ephemeral=True,
+        )
+
+    # ---------------------------------------------------------------
+    # /sthorror (salon) -> raccourci catégorie Horreur
+    # ---------------------------------------------------------------
+    @app_commands.command(name="sthorror", description="Abonne un salon à tous les jeux Steam d'Horreur (nouveaux + à venir).")
+    @app_commands.describe(salon="Salon où publier les jeux d'horreur")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def sthorror(self, interaction: discord.Interaction, salon: discord.TextChannel):
+        db.add_category_subscription(interaction.guild_id, salon.id, "horreur")
+        await interaction.response.send_message(
+            f"🔪 Tous les jeux d'**Horreur** (nouveaux et à venir, tout prix) seront publiés dans {salon.mention}.",
+            ephemeral=True,
+        )
+
+    # ---------------------------------------------------------------
+    # /stct (salon) -> raccourci catégorie Casse-tête
+    # ---------------------------------------------------------------
+    @app_commands.command(name="stct", description="Abonne un salon à tous les jeux Steam de Casse-tête (nouveaux + à venir).")
+    @app_commands.describe(salon="Salon où publier les jeux de casse-tête")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def stct(self, interaction: discord.Interaction, salon: discord.TextChannel):
+        db.add_category_subscription(interaction.guild_id, salon.id, "puzzle")
+        await interaction.response.send_message(
+            f"🧩 Tous les jeux de **Casse-tête** (nouveaux et à venir, tout prix) seront publiés dans {salon.mention}.",
+            ephemeral=True,
+        )
+
+    # ---------------------------------------------------------------
+    # /stall (salon) (catégorie) -> dump immédiat du catalogue existant
+    # + abonnement pour les futurs jeux de cette catégorie
+    # ---------------------------------------------------------------
+    @app_commands.command(
+        name="stall",
+        description="Affiche d'un coup tous les jeux existants d'une catégorie + abonne le salon aux futurs.",
+    )
+    @app_commands.describe(salon="Salon où tout publier", categorie="Catégorie de jeux")
+    @app_commands.choices(categorie=CATEGORY_CHOICES)
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def stall(self, interaction: discord.Interaction, salon: discord.TextChannel, categorie: app_commands.Choice[str]):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        label = STEAM_CATEGORIES[categorie.value]["label"]
+
+        appids = await steam_api.get_appids_by_category(self.session, categorie.value, max_appids=120)
+        if not appids:
+            await interaction.followup.send(
+                f"❌ Aucun jeu trouvé pour la catégorie **{label}** (Steam/SteamSpy a peut-être limité la requête, réessaie plus tard).",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.followup.send(
+            f"⏳ Récupération de tous les jeux **{label}**... ({len(appids)} jeux trouvés, "
+            f"je publie les {min(40, len(appids))} plus récents dans {salon.mention}, puis j'abonne le salon "
+            f"pour que les prochains arrivent automatiquement).",
+            ephemeral=True,
+        )
+
+        games = []
+        for i in range(0, len(appids), 10):
+            batch = appids[i:i + 10]
+            results = await asyncio.gather(*[steam_api.enrich_game(self.session, a) for a in batch])
+            games.extend([g for g in results if g])
+
+        games.sort(key=lambda g: g.get("release_date", ""), reverse=True)
+        games = games[:40]
+
+        for game in games:
+            embed = build_game_embed(game, upcoming=game.get("coming_soon", False),
+                                      footer_extra=f"Catalogue {label} — /stall")
+            view = build_steam_link_view(game)
+            await self._send(salon.id, embed, view=view)
+
+        db.add_category_subscription(interaction.guild_id, salon.id, categorie.value)
+
+        await interaction.followup.send(
+            f"✅ {len(games)} jeux **{label}** publiés dans {salon.mention}. "
+            f"Le salon est maintenant abonné : les prochains jeux **{label}** arriveront automatiquement.",
+            ephemeral=True,
+        )
+
+    # ---------------------------------------------------------------
     # Boucle de fond : vérifie Steam et publie
     # ---------------------------------------------------------------
     @tasks.loop(minutes=CHECK_INTERVAL_MINUTES)
@@ -151,6 +272,7 @@ class SteamCommands(commands.Cog):
         all_channels = db.get_feed_channels("new")
         preset_subs = db.get_preset_subscriptions()
         user_filters = db.get_all_user_filters()
+        category_subs = db.get_category_subscriptions()
 
         for appid in unseen:
             game = await steam_api.enrich_game(self.session, appid)
@@ -159,12 +281,19 @@ class SteamCommands(commands.Cog):
                 continue
 
             embed = build_game_embed(game, upcoming=False)
+            view = build_steam_link_view(game)
 
             # 1) salons "tous les jeux"
             for guild_id, channel_id in all_channels:
-                await self._send(channel_id, embed)
+                await self._send(channel_id, embed, view=view)
 
-            # 2) salons abonnés à un préfiltre
+            # 2) salons abonnés à une catégorie (/sthorror, /stct, /stcat, /stall)
+            for guild_id, channel_id, category_key in category_subs:
+                if steam_api.game_has_category(game, category_key):
+                    cat_embed = build_game_embed(game, upcoming=False, footer_extra=f"Catégorie : {STEAM_CATEGORIES[category_key]['label']}")
+                    await self._send(channel_id, cat_embed, view=build_steam_link_view(game))
+
+            # 3) salons abonnés à un préfiltre
             for guild_id, channel_id, preset_key in preset_subs:
                 preset = PRESETS.get(preset_key)
                 if not preset:
@@ -172,18 +301,19 @@ class SteamCommands(commands.Cog):
                 if steam_api.game_matches_filter(
                     game, preset["tags"], preset["categories"],
                     preset["price_min"], preset["price_max"], preset["demo_mode"],
+                    categories_all=preset.get("categories_all", False),
                 ):
                     preset_embed = build_game_embed(game, upcoming=False, footer_extra=f"Préfiltre : {preset['label']}")
-                    await self._send(channel_id, preset_embed)
+                    await self._send(channel_id, preset_embed, view=build_steam_link_view(game))
 
-            # 3) filtres personnels
+            # 4) filtres personnels
             for uf in user_filters:
                 if steam_api.game_matches_filter(
                     game, uf["tags"], uf["categories"],
                     uf["price_min"], uf["price_max"], uf["demo_mode"],
                 ):
                     personal_embed = build_game_embed(game, upcoming=False, footer_extra="Filtre personnel")
-                    await self._send(uf["channel_id"], personal_embed, mention_user=uf["user_id"])
+                    await self._send(uf["channel_id"], personal_embed, mention_user=uf["user_id"], view=build_steam_link_view(game))
 
     async def _process_upcoming(self):
         appids = await steam_api.get_upcoming_appids(self.session, count=30)
@@ -192,7 +322,8 @@ class SteamCommands(commands.Cog):
             return
 
         channels = db.get_feed_channels("upcoming")
-        if not channels:
+        category_subs = db.get_category_subscriptions()
+        if not channels and not category_subs:
             for a in unseen:
                 db.mark_posted(a, "upcoming")
             return
@@ -203,10 +334,17 @@ class SteamCommands(commands.Cog):
             if not game:
                 continue
             embed = build_game_embed(game, upcoming=True)
+            view = build_steam_link_view(game)
             for guild_id, channel_id in channels:
-                await self._send(channel_id, embed)
+                await self._send(channel_id, embed, view=view)
 
-    async def _send(self, channel_id: int, embed: discord.Embed, mention_user: int = None):
+            # les abonnements catégorie reçoivent aussi les jeux à venir (cf. /stall, /sthorror...)
+            for guild_id, channel_id, category_key in category_subs:
+                if steam_api.game_has_category(game, category_key):
+                    cat_embed = build_game_embed(game, upcoming=True, footer_extra=f"Catégorie : {STEAM_CATEGORIES[category_key]['label']}")
+                    await self._send(channel_id, cat_embed, view=build_steam_link_view(game))
+
+    async def _send(self, channel_id: int, embed: discord.Embed, mention_user: int = None, view: discord.ui.View = None):
         channel = self.bot.get_channel(channel_id)
         if channel is None:
             try:
@@ -215,7 +353,7 @@ class SteamCommands(commands.Cog):
                 return
         content = f"<@{mention_user}>" if mention_user else None
         try:
-            await channel.send(content=content, embed=embed)
+            await channel.send(content=content, embed=embed, view=view)
         except discord.HTTPException as e:
             print(f"[_send] Impossible d'envoyer dans {channel_id} : {e}")
 

@@ -49,6 +49,13 @@ def init_db():
                 PRIMARY KEY (user_id, guild_id)
             );
 
+            CREATE TABLE IF NOT EXISTS category_subscriptions (
+                guild_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL,
+                category_key TEXT NOT NULL,
+                PRIMARY KEY (guild_id, channel_id, category_key)
+            );
+
             CREATE TABLE IF NOT EXISTS posted_games (
                 appid INTEGER NOT NULL,
                 context TEXT NOT NULL,        -- 'new' ou 'upcoming'
@@ -174,6 +181,33 @@ def get_all_user_filters():
                 "demo_mode": row["demo_mode"],
             })
         return result
+
+
+# -------------------------- category_subscriptions --------------------------
+
+def add_category_subscription(guild_id: int, channel_id: int, category_key: str):
+    with closing(get_conn()) as conn, conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO category_subscriptions (guild_id, channel_id, category_key) "
+            "VALUES (?, ?, ?)",
+            (guild_id, channel_id, category_key),
+        )
+
+
+def remove_category_subscription(guild_id: int, channel_id: int, category_key: str):
+    with closing(get_conn()) as conn, conn:
+        conn.execute(
+            "DELETE FROM category_subscriptions WHERE guild_id=? AND channel_id=? AND category_key=?",
+            (guild_id, channel_id, category_key),
+        )
+
+
+def get_category_subscriptions():
+    with closing(get_conn()) as conn:
+        rows = conn.execute(
+            "SELECT guild_id, channel_id, category_key FROM category_subscriptions"
+        ).fetchall()
+        return [(r["guild_id"], r["channel_id"], r["category_key"]) for r in rows]
 
 
 # ----------------------------- posted_games --------------------------------

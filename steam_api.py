@@ -17,6 +17,7 @@ from config import STEAM_CC, STEAM_LANG, STEAM_TAGS, STEAM_CATEGORIES
 SEARCH_URL = "https://store.steampowered.com/search/results/"
 APPDETAILS_URL = "https://store.steampowered.com/api/appdetails"
 STEAMSPY_URL = "https://steamspy.com/api.php"
+REVIEWS_URL = "https://store.steampowered.com/appreviews/{appid}"
 
 
 async def _fetch_json(session: aiohttp.ClientSession, url: str, params: dict):
@@ -90,6 +91,7 @@ async def get_app_details(session: aiohttp.ClientSession, appid: int):
 
     categories = [c["id"] for c in d.get("categories", [])] if d.get("categories") else []
     has_demo = bool(d.get("demos"))
+    metacritic = d.get("metacritic", {}).get("score") if d.get("metacritic") else None
 
     return {
         "appid": appid,
@@ -101,6 +103,7 @@ async def get_app_details(session: aiohttp.ClientSession, appid: int):
         "is_free": is_free,
         "categories": categories,
         "has_demo": has_demo,
+        "metacritic": metacritic,
         "release_date": d.get("release_date", {}).get("date", "Inconnue"),
         "coming_soon": d.get("release_date", {}).get("coming_soon", False),
         "developers": d.get("developers", []),
@@ -118,23 +121,73 @@ async def get_steamspy_tags(session: aiohttp.ClientSession, appid: int):
 
 
 async def enrich_game(session: aiohttp.ClientSession, appid: int):
-    """Récupère détails + tags communautaires en parallèle pour un appid."""
-    details, tags = await asyncio.gather(
+    """Récupère détails + tags communautaires + note Steam en parallèle pour un appid."""
+    details, tags, reviews = await asyncio.gather(
         get_app_details(session, appid),
         get_steamspy_tags(session, appid),
+        get_review_summary(session, appid),
     )
     if not details:
         return None
     details["community_tags"] = tags
+    details["reviews"] = reviews
     return details
+
+
+async def get_review_summary(session: aiohttp.ClientSession, appid: int):
+    """Note des joueurs Steam (% positif, description type 'Très positive')."""
+    params = {
+        "json": 1,
+        "language": "all",
+        "purchase_type": "all",
+        "num_per_page": 0,
+    }
+    url = REVIEWS_URL.format(appid=appid)
+    data = await _fetch_json(session, url, params)
+    if not data or "query_summary" not in data:
+        return None
+    qs = data["query_summary"]
+    total = qs.get("total_reviews", 0)
+    if total == 0:
+        return None
+    positive = qs.get("total_positive", 0)
+    percent = round((positive / total) * 100) if total else None
+    return {
+        "description": qs.get("review_score_desc", ""),  # ex: "Très positive"
+        "percent_positive": percent,
+        "total_reviews": total,
+    }
+
+
+async def get_appids_by_category(session: aiohttp.ClientSession, category_key: str, max_appids: int = 120):
+    """Liste des appid (jeux déjà sortis) pour une catégorie/tag donné, via SteamSpy."""
+    info = STEAM_CATEGORIES.get(category_key)
+    if not info:
+        return []
+    params = {"request": "tag", "tag": info["steamspy_tag"]}
+    data = await _fetch_json(session, STEAMSPY_URL, params)
+    if not data or not isinstance(data, dict):
+        return []
+    appids = [int(appid) for appid in list(data.keys())[:max_appids]]
+    return appids
 
 
 # ----------------------------------------------------------------------
 # Logique de filtrage : est-ce que ce jeu correspond à ce filtre ?
 # ----------------------------------------------------------------------
 
+def game_has_category(game: dict, category_key: str) -> bool:
+    """Vérifie si un jeu correspond à une catégorie donnée (horreur, casse-tête...)."""
+    info = STEAM_CATEGORIES.get(category_key)
+    if not info:
+        return False
+    community_tags = game.get("community_tags", [])
+    return any(info["keyword"] in tag for tag in community_tags)
+
+
 def game_matches_filter(game: dict, tags: list, categories: list,
-                         price_min: int, price_max: int, demo_mode: str) -> bool:
+                         price_min: int, price_max: int, demo_mode: str,
+                         categories_all: bool = False) -> bool:
     # --- Tag (mode de jeu : solo, multijoueur, coop...) ---
     if tags:
         wanted_ids = {STEAM_TAGS[t]["id"] for t in tags if t in STEAM_TAGS}
@@ -145,8 +198,13 @@ def game_matches_filter(game: dict, tags: list, categories: list,
     if categories:
         community_tags = game.get("community_tags", [])
         keywords = [STEAM_CATEGORIES[c]["keyword"] for c in categories if c in STEAM_CATEGORIES]
-        if not any(any(kw in tag for tag in community_tags) for kw in keywords):
-            return False
+        matches = [any(kw in tag for tag in community_tags) for kw in keywords]
+        if categories_all:
+            if not all(matches):
+                return False
+        else:
+            if not any(matches):
+                return False
 
     # --- Prix ---
     price = game.get("price_eur")

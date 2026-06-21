@@ -20,21 +20,21 @@ STEAM_TAGS = {
 # clé interne : (label affiché, mot-clé à chercher dans les tags SteamSpy)
 # -------------------------------------------------------------------------
 STEAM_CATEGORIES = {
-    "horreur": {"label": "Horreur", "keyword": "horror"},
-    "aventure": {"label": "Aventure", "keyword": "adventure"},
-    "action": {"label": "Action", "keyword": "action"},
-    "indie": {"label": "Indé", "keyword": "indie"},
-    "rpg": {"label": "RPG", "keyword": "rpg"},
-    "strategie": {"label": "Stratégie", "keyword": "strategy"},
-    "simulation": {"label": "Simulation", "keyword": "simulation"},
-    "casual": {"label": "Casual", "keyword": "casual"},
-    "puzzle": {"label": "Puzzle", "keyword": "puzzle"},
-    "course": {"label": "Course", "keyword": "racing"},
-    "sport": {"label": "Sport", "keyword": "sports"},
-    "survie": {"label": "Survie", "keyword": "survival"},
-    "monde_ouvert": {"label": "Monde ouvert", "keyword": "open world"},
-    "fun": {"label": "Fun / Délire", "keyword": "funny"},
-    "crazy": {"label": "Crazy / Fou", "keyword": "psychological"},
+    "horreur": {"label": "Horreur", "keyword": "horror", "steamspy_tag": "Horror"},
+    "aventure": {"label": "Aventure", "keyword": "adventure", "steamspy_tag": "Adventure"},
+    "action": {"label": "Action", "keyword": "action", "steamspy_tag": "Action"},
+    "indie": {"label": "Indé", "keyword": "indie", "steamspy_tag": "Indie"},
+    "rpg": {"label": "RPG", "keyword": "rpg", "steamspy_tag": "RPG"},
+    "strategie": {"label": "Stratégie", "keyword": "strategy", "steamspy_tag": "Strategy"},
+    "simulation": {"label": "Simulation", "keyword": "simulation", "steamspy_tag": "Simulation"},
+    "casual": {"label": "Casual", "keyword": "casual", "steamspy_tag": "Casual"},
+    "puzzle": {"label": "Casse-tête", "keyword": "puzzle", "steamspy_tag": "Puzzle"},
+    "course": {"label": "Course", "keyword": "racing", "steamspy_tag": "Racing"},
+    "sport": {"label": "Sport", "keyword": "sports", "steamspy_tag": "Sports"},
+    "survie": {"label": "Survie", "keyword": "survival", "steamspy_tag": "Survival"},
+    "monde_ouvert": {"label": "Monde ouvert", "keyword": "open world", "steamspy_tag": "Open World"},
+    "fun": {"label": "Fun / Drôle", "keyword": "funny", "steamspy_tag": "Funny"},
+    "crazy": {"label": "Crazy / Fou", "keyword": "psychological", "steamspy_tag": "Psychological Horror"},
 }
 
 # -------------------------------------------------------------------------
@@ -106,6 +106,15 @@ PRESETS = {
         "tags": ["solo"],
         "categories": ["rpg"],
         "price_min": 1,
+        "price_max": 99999,
+        "demo_mode": "peu_importe",
+    },
+    "horreur_drole": {
+        "label": "🤡 Horreur mais drôle",
+        "tags": [],
+        "categories": ["horreur", "fun"],
+        "categories_all": True,  # le jeu doit être horreur ET drôle, pas l'un ou l'autre
+        "price_min": 0,
         "price_max": 99999,
         "demo_mode": "peu_importe",
     },
