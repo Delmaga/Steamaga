@@ -9,10 +9,15 @@ Variables d'environnement requises (fichier .env, voir .env.example) :
 """
 
 import os
+import sys
 import asyncio
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
+
+# S'assure que le dossier du script est dans le chemin d'import, quel que soit
+# le répertoire de travail utilisé par la plateforme d'hébergement.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import database as db
 
@@ -40,7 +45,7 @@ async def main():
         )
     db.init_db()
     async with bot:
-        await bot.load_extension("cogs.steam_commands")
+        await bot.load_extension("steam_commands")
         await bot.start(TOKEN)
 
 

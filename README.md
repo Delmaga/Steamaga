@@ -69,6 +69,10 @@ Tu peux abonner plusieurs salons à plusieurs packs différents.
 
 ## ⚙️ Fonctionnement technique
 
+- Tous les fichiers Python sont à plat (pas de sous-dossier), pour éviter tout
+  souci de package Python sur les plateformes d'hébergement qui ne gèrent pas
+  toujours bien les sous-répertoires.
+
 - Une tâche de fond vérifie Steam toutes les **10 minutes** (configurable dans
   `config.py` via `CHECK_INTERVAL_MINUTES`).
 - Le bot utilise le moteur de recherche Steam (tri par date de sortie) pour
